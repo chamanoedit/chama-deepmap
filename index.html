@@ -1,0 +1,1192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Gere mapas de profundidade (deep maps) coloridos a partir de qualquer vídeo, direto no navegador. Por Guilherme Guisolfi (@chamadegui).">
+<meta property="og:title" content="CHAMA DeepMap">
+<meta property="og:description" content="Mapas de profundidade coloridos a partir de qualquer vídeo, direto no navegador.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3CradialGradient id='g' cx='.3' cy='.3' r='.9'%3E%3Cstop offset='0' stop-color='%23fcffa4'/%3E%3Cstop offset='.35' stop-color='%23f98e09'/%3E%3Cstop offset='.7' stop-color='%23bc3754'/%3E%3Cstop offset='1' stop-color='%2357106e'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3C/svg%3E">
+<title>CHAMA DEEPMAP</title>
+<style>
+:root{
+  color-scheme: light;
+  interpolate-size: allow-keywords;
+  --bg:#f5f5f7;
+  --surface:#ffffff;
+  --field:#f2f2f4;
+  --field-2:#e8e8ed;
+  --line:rgba(0,0,0,.08);
+  --text:#1d1d1f;
+  --muted:#6e6e73;
+  --dim:#86868b;
+  --accent:#f5900a;
+  --on-text:#ffffff;
+  --knob:#ffffff;
+  --shadow:0 1px 2px rgba(0,0,0,.04), 0 6px 24px rgba(0,0,0,.05);
+  --bar:rgba(245,245,247,.78);
+  --danger:#d70015;
+  --ok:#248a3d;
+  --sans:-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono:"SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#000000; --surface:#1c1c1e; --field:#2c2c2e; --field-2:#3a3a3c; --line:rgba(255,255,255,.09);
+    --text:#f5f5f7; --muted:#a1a1a6; --dim:#6e6e73; --accent:#ff9f0a; --on-text:#000000; --knob:#f5f5f7;
+    --shadow:none; --bar:rgba(0,0,0,.72); --danger:#ff453a; --ok:#30d158;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#000000; --surface:#1c1c1e; --field:#2c2c2e; --field-2:#3a3a3c; --line:rgba(255,255,255,.09);
+  --text:#f5f5f7; --muted:#a1a1a6; --dim:#6e6e73; --accent:#ff9f0a; --on-text:#000000; --knob:#f5f5f7;
+  --shadow:none; --bar:rgba(0,0,0,.72); --danger:#ff453a; --ok:#30d158;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{height:auto; overflow-y:auto}
+body{
+  min-height:100%; margin:0; background:var(--bg); color:var(--text);
+  font-family:var(--sans); font-size:14px; line-height:1.43; letter-spacing:-.01em;
+  -webkit-font-smoothing:antialiased; padding-inline:20px; padding-block:0 28px;
+}
+button,select,input{font:inherit; color:inherit; letter-spacing:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:6px}
+
+/* ---------- nav ---------- */
+.nav{
+  position:sticky; top:env(safe-area-inset-top,0px); z-index:5; margin-inline:-20px; padding-inline:20px;
+  height:52px; display:flex; align-items:center; gap:16px;
+  background:var(--bar); backdrop-filter:saturate(180%) blur(20px); -webkit-backdrop-filter:saturate(180%) blur(20px);
+  border-bottom:1px solid var(--line);
+}
+.brand{font-size:17px; font-weight:600; letter-spacing:-.02em; margin:0; display:flex; align-items:center; gap:10px}
+.brand b{font-weight:700}
+.brand span{font-weight:400; color:var(--muted)}
+.brand canvas{width:18px; height:18px; border-radius:5px; display:block}
+.status{margin-left:auto; font-size:12px; color:var(--muted); display:inline-flex; align-items:center; gap:7px; white-space:nowrap}
+.status i{width:6px; height:6px; border-radius:50%; background:var(--dim)}
+.status.ok i{background:var(--ok)} .status.warn i{background:var(--accent)}
+
+/* ---------- layout ---------- */
+.app{display:grid; grid-template-columns:minmax(0,1fr) 332px; gap:24px; align-items:start; padding-top:20px; max-width:1680px; margin-inline:auto}
+@media (max-width:960px){ .app{grid-template-columns:minmax(0,1fr)} }
+
+/* ---------- stage ---------- */
+.stage{display:flex; flex-direction:column; gap:14px; min-width:0}
+.viewer{
+  position:relative; background:#000; border-radius:22px; display:grid; place-items:center;
+  padding:22px 46px 22px 22px; min-height:260px; overflow:hidden;
+}
+.frame{position:relative; max-width:100%; background:#000; border-radius:10px; overflow:hidden; touch-action:none; cursor:ew-resize}
+.frame canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+.wipe{position:absolute; top:0; bottom:0; width:2px; left:50%; transform:translateX(-1px); background:rgba(255,255,255,.9); pointer-events:none}
+.wipe::after{
+  content:""; position:absolute; top:50%; left:50%; width:30px; height:30px; transform:translate(-50%,-50%); border-radius:50%;
+  background:rgba(255,255,255,.28) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3E%3Cpath d='M12 10l-5 5 5 5M18 10l5 5-5 5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/100% no-repeat;
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); border:1px solid rgba(255,255,255,.55);
+}
+.tag{
+  position:absolute; bottom:12px; font-size:11px; font-weight:500; color:#fff; padding:4px 10px; border-radius:999px; pointer-events:none;
+  background:rgba(40,40,42,.55); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+}
+.tag.l{left:12px} .tag.r{right:12px}
+.scale{position:absolute; right:16px; top:22px; bottom:22px; width:16px; display:flex; flex-direction:column; align-items:center; gap:8px}
+.scale canvas{flex:1; width:4px; border-radius:2px; min-height:60px}
+.scale b{font-size:10px; font-weight:500; color:rgba(255,255,255,.55); writing-mode:vertical-rl; transform:rotate(180deg); letter-spacing:.01em}
+.demo-badge{
+  position:absolute; left:50%; top:14px; transform:translateX(-50%); font-size:12px; color:rgba(255,255,255,.85); white-space:nowrap;
+  background:rgba(40,40,42,.55); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); padding:5px 12px; border-radius:999px; pointer-events:none;
+}
+.drop{
+  position:absolute; inset:0; display:grid; place-items:center; pointer-events:none;
+  background:rgba(0,0,0,.72); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  color:#fff; font-size:21px; font-weight:600; letter-spacing:-.02em;
+}
+.transport{display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-inline:4px}
+.play{
+  width:40px; height:40px; border-radius:50%; border:0; background:var(--text); display:grid; place-items:center; flex:none;
+}
+.play svg{width:13px; height:13px; fill:var(--bg)}
+.play:disabled{opacity:.3; cursor:default}
+.timeline{flex:1; min-width:160px}
+.tc{font-family:var(--mono); font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap}
+.tc strong{color:var(--text); font-weight:500}
+
+/* ---------- segmented ---------- */
+.seg{display:inline-grid; grid-auto-flow:column; grid-auto-columns:1fr; background:var(--field-2); border-radius:9px; padding:2px; gap:2px}
+.seg button{border:0; background:transparent; border-radius:7px; padding:5px 12px; font-size:12.5px; font-weight:500; color:var(--text); white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--surface); box-shadow:0 1px 3px rgba(0,0,0,.12), 0 0 0 .5px rgba(0,0,0,.04)}
+:root[data-theme="dark"] .seg button[aria-pressed="true"]{background:#636366}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .seg button[aria-pressed="true"]{background:#636366} }
+.seg.full{display:grid; width:100%}
+
+/* ---------- ranges ---------- */
+input[type=range]{-webkit-appearance:none; appearance:none; width:100%; height:24px; background:transparent; cursor:pointer; margin:0; --p:50%}
+input[type=range]::-webkit-slider-runnable-track{height:4px; border-radius:2px; background:linear-gradient(to right, var(--accent) var(--p), var(--field-2) var(--p))}
+input[type=range]::-moz-range-track{height:4px; border-radius:2px; background:var(--field-2)}
+input[type=range]::-moz-range-progress{height:4px; border-radius:2px; background:var(--accent)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:20px; height:20px; margin-top:-8px; border-radius:50%; background:#fff; border:0; box-shadow:0 1px 4px rgba(0,0,0,.28), 0 0 0 .5px rgba(0,0,0,.06)}
+input[type=range]::-moz-range-thumb{width:20px; height:20px; border-radius:50%; background:#fff; border:0; box-shadow:0 1px 4px rgba(0,0,0,.28)}
+input[type=range]:disabled{opacity:.35; cursor:default}
+.timeline::-webkit-slider-runnable-track{background:linear-gradient(to right, var(--text) var(--p), var(--field-2) var(--p))}
+.timeline::-moz-range-progress{background:var(--text)}
+
+/* ---------- sidebar groups ---------- */
+.panel{display:flex; flex-direction:column; gap:12px; min-width:0}
+.panel > *{flex:none}
+@media (min-width:961px){
+  .panel{position:sticky; top:72px; max-height:calc(100vh - 92px); overflow-y:auto; padding:2px 4px 8px 2px; margin:-2px -4px 0 -2px; scrollbar-width:thin; scrollbar-color:var(--field-2) transparent}
+}
+.group{background:var(--surface); border-radius:16px; box-shadow:var(--shadow); overflow:hidden}
+.group > summary{
+  list-style:none; display:flex; align-items:center; gap:10px; padding:14px 16px; cursor:pointer; user-select:none;
+}
+.group > summary::-webkit-details-marker{display:none}
+.group > summary h2{margin:0; font-size:15px; font-weight:600; letter-spacing:-.015em}
+.group > summary .sum{margin-left:auto; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%}
+.group > summary .chev{flex:none; width:10px; height:10px; transition:transform .25s ease; color:var(--dim)}
+.group[open] > summary .chev{transform:rotate(90deg)}
+.group > summary:hover .chev{color:var(--muted)}
+.group::details-content{height:0; overflow:clip; transition:height .28s ease, content-visibility .28s allow-discrete}
+.group[open]::details-content{height:auto}
+.body{padding:2px 16px 16px; display:flex; flex-direction:column; gap:14px; border-top:1px solid var(--line); padding-top:14px}
+
+.field{display:flex; flex-direction:column; gap:6px; min-width:0}
+.lbl{font-size:13px; color:var(--text); display:flex; justify-content:space-between; align-items:baseline; gap:8px}
+.lbl output{font-family:var(--mono); font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums}
+.row{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+select, input[type=number]{
+  width:100%; background:var(--field); border:0; border-radius:9px; padding:8px 10px; font-size:13px; appearance:none; -webkit-appearance:none;
+}
+select{
+  padding-right:28px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%2386868b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 9px center; background-size:10px;
+}
+input[type=number]{font-variant-numeric:tabular-nums}
+.btn{
+  border:0; border-radius:999px; padding:10px 18px; font-size:14px; font-weight:500; background:var(--field); color:var(--text);
+  display:inline-flex; align-items:center; justify-content:center; gap:8px; transition:background .15s, opacity .15s;
+}
+.btn:hover:not(:disabled){background:var(--field-2)}
+.btn.primary{background:var(--text); color:var(--bg)}
+.btn.primary:hover:not(:disabled){opacity:.86; background:var(--text)}
+.btn:disabled{opacity:.35; cursor:default}
+.btn.link{background:none; padding:0; color:var(--accent); font-size:13px; font-weight:500}
+.btn.link:hover:not(:disabled){background:none; text-decoration:underline}
+.actions{display:flex; gap:8px; flex-wrap:wrap}
+.actions .btn{flex:1 1 120px}
+.hint{font-size:12px; color:var(--dim); margin:0; line-height:1.4}
+.note{font-size:12.5px; color:var(--muted); margin:0}
+.note.err{color:var(--danger)}
+.file{
+  display:flex; align-items:center; gap:12px; padding:10px 12px; background:var(--field); border-radius:12px;
+}
+.file canvas{width:52px; height:32px; border-radius:6px; background:#000; flex:none; object-fit:cover}
+.file div{min-width:0; display:flex; flex-direction:column}
+.file strong{font-weight:500; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.file span{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums}
+.progress{display:flex; flex-direction:column; gap:6px}
+.bar{height:4px; background:var(--field-2); border-radius:2px; overflow:hidden}
+.bar i{display:block; height:100%; width:0; background:var(--accent); border-radius:2px; transition:width .2s linear}
+.pmeta{display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums}
+
+.maps{display:grid; grid-template-columns:repeat(4,1fr); gap:10px 8px}
+.map{border:0; background:none; padding:0; display:flex; flex-direction:column; gap:5px; align-items:stretch}
+.map i{height:26px; border-radius:8px; display:block; box-shadow:inset 0 0 0 .5px rgba(0,0,0,.12); transition:box-shadow .15s}
+.map span{font-size:11px; color:var(--muted); text-align:center}
+.map[aria-pressed="true"] i{box-shadow:0 0 0 2px var(--surface), 0 0 0 4px var(--accent)}
+.map[aria-pressed="true"] span{color:var(--text); font-weight:500}
+.toggle{display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:13px}
+.switch{position:relative; width:42px; height:26px; flex:none}
+.switch input{position:absolute; inset:0; opacity:0; margin:0; cursor:pointer}
+.switch span{position:absolute; inset:0; background:var(--field-2); border-radius:999px; transition:background .2s; pointer-events:none}
+.switch span::after{content:""; position:absolute; left:2px; top:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 2px 4px rgba(0,0,0,.2); transition:transform .2s}
+.switch input:checked + span{background:var(--ok)}
+.switch input:checked + span::after{transform:translateX(16px)}
+.switch input:focus-visible + span{outline:2px solid var(--accent); outline-offset:2px}
+.sub{border-top:1px solid var(--line); padding-top:12px; display:flex; flex-direction:column; gap:12px}
+.sub > summary{list-style:none; font-size:13px; color:var(--muted); cursor:pointer; display:flex; align-items:center; gap:6px}
+.sub > summary::-webkit-details-marker{display:none}
+.sub > summary svg{width:8px; height:8px; transition:transform .2s}
+.sub[open] > summary svg{transform:rotate(90deg)}
+.foot{max-width:1680px; margin:22px auto 0; font-size:12px; color:var(--dim); display:flex; gap:18px; flex-wrap:wrap}
+.hidden-video{position:absolute; width:2px; height:2px; opacity:0; pointer-events:none; left:0; top:0}
+@media (prefers-reduced-motion:reduce){ *{transition:none!important} .group::details-content{transition:none} }
+</style>
+</head>
+<body>
+
+
+<header class="nav">
+  <h1 class="brand"><canvas id="ramp" width="18" height="18" aria-hidden="true"></canvas><b>CHAMA</b><span>DeepMap</span></h1>
+  <span class="status" id="chipEngine"><i></i><span>Verificando GPU…</span></span>
+</header>
+
+<main class="app">
+  <section class="stage" aria-label="Visualização">
+    <div class="viewer" id="viewer">
+      <div class="frame" id="frame">
+        <canvas id="cvOrig" aria-label="Frame original"></canvas>
+        <canvas id="cvDepth" aria-label="Mapa de profundidade"></canvas>
+        <div class="wipe" id="wipe"></div>
+        <span class="tag l" id="tagL">Original</span>
+        <span class="tag r" id="tagR">Deep map</span>
+      </div>
+      <div class="scale" aria-hidden="true">
+        <b>Perto</b>
+        <canvas id="cvScale" width="1" height="256"></canvas>
+        <b>Longe</b>
+      </div>
+      <div class="demo-badge" id="demoBadge">Cena de exemplo</div>
+      <div class="drop" id="dropHint" hidden>Solte para carregar</div>
+    </div>
+    <div class="transport">
+      <button class="play" id="btnPlay" aria-label="Reproduzir">
+        <svg viewBox="0 0 14 14" id="icoPlay"><path d="M3 1.5v11l9-5.5z"/></svg>
+      </button>
+      <input class="timeline" type="range" id="timeline" min="0" max="0" value="0" step="1" aria-label="Frame">
+      <span class="tc" id="tc"><strong>000</strong> / 000 · 00:00.00</span>
+      <div class="seg views" role="group" aria-label="Modo de visualização">
+        <button data-view="orig" aria-pressed="false">Original</button>
+        <button data-view="compare" aria-pressed="true">Comparar</button>
+        <button data-view="depth" aria-pressed="false">Deep map</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <details class="group">
+      <summary><h2>Vídeo</h2><span class="sum" id="sumVideo">Exemplo</span><svg class="chev" viewBox="0 0 10 10"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <div class="body">
+        <input type="file" id="file" accept="video/*,image/*" hidden>
+        <div class="file" id="fileMeta" hidden></div>
+        <button class="btn" id="btnFile">Escolher vídeo ou imagem</button>
+        <p class="hint">Ou arraste o arquivo até a tela. MP4, MOV e WebM funcionam.</p>
+      </div>
+    </details>
+
+    <details class="group" id="cardGen">
+      <summary><h2>Gerar</h2><span class="sum" id="sumGen">770 px · 24 fps</span><svg class="chev" viewBox="0 0 10 10"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <div class="body">
+        <div class="row">
+          <div class="field">
+            <label class="lbl" for="selRes">Resolução</label>
+            <select id="selRes">
+              <option value="392">392 px · rápido</option>
+              <option value="518">518 px · padrão</option>
+              <option value="770" selected>770 px · detalhe</option>
+              <option value="1022">1022 px · máximo</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="lbl" for="selFps">Frames/s</label>
+            <select id="selFps">
+              <option value="12">12 fps</option>
+              <option value="15">15 fps</option>
+              <option value="24" selected>24 fps</option>
+              <option value="25">25 fps</option>
+              <option value="30">30 fps</option>
+              <option value="60">60 fps</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" id="rowTrim">
+          <div class="field">
+            <label class="lbl" for="inStart">Início (s)</label>
+            <input type="number" id="inStart" min="0" step="0.1" value="0">
+          </div>
+          <div class="field">
+            <label class="lbl" for="inEnd">Fim (s)</label>
+            <input type="number" id="inEnd" min="0" step="0.1" value="0">
+          </div>
+        </div>
+        <details class="sub">
+          <summary><svg viewBox="0 0 10 10"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Processamento</summary>
+          <select id="selEngine" aria-label="Processamento">
+            <option value="auto" selected>Automático</option>
+            <option value="gpu">Placa de vídeo (WebGPU)</option>
+            <option value="cpu">Processador (mais lento)</option>
+          </select>
+        </details>
+        <p class="note" id="estimate"></p>
+        <div class="actions">
+          <button class="btn primary" id="btnGen" disabled>Gerar deep map</button>
+          <button class="btn" id="btnCancel" hidden>Parar</button>
+        </div>
+        <div class="progress" id="progress" hidden>
+          <div class="bar"><i id="barFill"></i></div>
+          <div class="pmeta"><span id="pLeft">—</span><span id="pRight">—</span></div>
+        </div>
+        <p class="note" id="genMsg" hidden></p>
+      </div>
+    </details>
+
+    <details class="group">
+      <summary><h2>Ajustes</h2><span class="sum" id="sumAdj">Inferno</span><svg class="chev" viewBox="0 0 10 10"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <div class="body">
+        <div class="maps" id="maps" role="group" aria-label="Paleta de cores"></div>
+        <div class="field">
+          <label class="lbl" for="rIntensity">Intensidade <output id="oIntensity">100</output></label>
+          <input type="range" id="rIntensity" min="0" max="200" value="100">
+        </div>
+        <div class="field">
+          <label class="lbl" for="rContrast">Contraste <output id="oContrast">100</output></label>
+          <input type="range" id="rContrast" min="30" max="300" value="100">
+        </div>
+        <div class="field">
+          <label class="lbl" for="rTemporal">Anti-flicker <output id="oTemporal">2</output></label>
+          <input type="range" id="rTemporal" min="0" max="8" value="2">
+        </div>
+        <details class="sub">
+          <summary><svg viewBox="0 0 10 10"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Mais ajustes</summary>
+          <div class="row">
+            <div class="field">
+              <label class="lbl" for="rNear">Corte perto <output id="oNear">100</output></label>
+              <input type="range" id="rNear" min="5" max="100" value="100">
+            </div>
+            <div class="field">
+              <label class="lbl" for="rFar">Corte longe <output id="oFar">0</output></label>
+              <input type="range" id="rFar" min="0" max="95" value="0">
+            </div>
+          </div>
+          <div class="field">
+            <label class="lbl" for="rBlur">Suavizar bordas <output id="oBlur">0</output></label>
+            <input type="range" id="rBlur" min="0" max="8" value="0">
+          </div>
+          <div class="field">
+            <span class="lbl">Escala</span>
+            <div class="seg full norm" role="group" aria-label="Normalização">
+              <button data-norm="frame" aria-pressed="true">Por frame</button>
+              <button data-norm="global" aria-pressed="false">Vídeo inteiro</button>
+            </div>
+            <p class="hint">Por frame usa todo o contraste em cada frame. Vídeo inteiro mantém a mesma escala do começo ao fim.</p>
+          </div>
+          <div class="toggle">
+            <span>Inverter (perto escuro)</span>
+            <label class="switch"><input type="checkbox" id="chkInvert" aria-label="Inverter"><span></span></label>
+          </div>
+        </details>
+        <div><button class="btn link" id="btnReset">Restaurar padrão</button></div>
+      </div>
+    </details>
+
+    <details class="group">
+      <summary><h2>Exportar</h2><span class="sum" id="sumOut"></span><svg class="chev" viewBox="0 0 10 10"><path d="M3.5 1.5L7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <div class="body">
+        <div class="field">
+          <label class="lbl" for="selOut">Tamanho</label>
+          <select id="selOut"></select>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="btnMp4">Vídeo MP4</button>
+          <button class="btn" id="btnPng">Frame PNG</button>
+        </div>
+        <button class="btn" id="btnZip">Sequência PNG (.zip)</button>
+        <div class="progress" id="exProgress" hidden>
+          <div class="bar"><i id="exFill"></i></div>
+          <div class="pmeta"><span id="exLeft">—</span><span id="exRight">—</span></div>
+        </div>
+        <p class="note" id="exMsg" hidden></p>
+      </div>
+    </details>
+  </aside>
+</main>
+
+<footer class="foot">
+  <span>Processado no seu navegador. O vídeo não sai do seu computador.</span>
+  <span>Espaço toca e pausa · ← → avança frame a frame</span>
+</footer>
+
+<video class="hidden-video" id="video" muted playsinline preload="auto"></video>
+
+<script async src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.webgpu.min.js"></script>
+<script async src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js"></script>
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+(() => {
+"use strict";
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+
+/* ================= colormaps ================= */
+const LUT_HEX = {"inferno": "00000401000501010601010802010a02020c02020e03021004031204031405041706041907051b08051d09061f0a07220b07240c08260d08290e092b10092d110a30120a32140b34150b37160b39180c3c190c3e1b0c411c0c431e0c451f0c48210c4a230c4c240c4f260c51280b53290b552b0b572d0b592f0a5b310a5c320a5e340a5f3609613809623909633b09643d09653e0966400a67420a68440a68450a69470b6a490b6a4a0c6b4c0c6b4d0d6c4f0d6c510e6c520e6d540f6d550f6d57106e59106e5a116e5c126e5d126e5f136e61136e62146e64156e65156e67166e69166e6a176e6c186e6d186e6f196e71196e721a6e741a6e751b6e771c6d781c6d7a1d6d7c1d6d7d1e6d7f1e6c801f6c82206c84206b85216b87216b88226a8a226a8c23698d23698f24699025689225689326679526679727669827669a28659b29649d29649f2a63a02a63a22b62a32c61a52c60a62d60a82e5fa92e5eab2f5ead305dae305cb0315bb1325ab3325ab43359b63458b73557b93556ba3655bc3754bd3853bf3952c03a51c13a50c33b4fc43c4ec63d4dc73e4cc83f4bca404acb4149cc4248ce4347cf4446d04545d24644d34743d44842d54a41d74b3fd84c3ed94d3dda4e3cdb503bdd513ade5238df5337e05536e15635e25734e35933e45a31e55c30e65d2fe75e2ee8602de9612bea632aeb6429eb6628ec6726ed6925ee6a24ef6c23ef6e21f06f20f1711ff1731df2741cf3761bf37819f47918f57b17f57d15f67e14f68013f78212f78410f8850ff8870ef8890cf98b0bf98c0af98e09fa9008fa9207fa9407fb9606fb9706fb9906fb9b06fb9d07fc9f07fca108fca309fca50afca60cfca80dfcaa0ffcac11fcae12fcb014fcb216fcb418fbb61afbb81dfbba1ffbbc21fbbe23fac026fac228fac42afac62df9c72ff9c932f9cb35f8cd37f8cf3af7d13df7d340f6d543f6d746f5d949f5db4cf4dd4ff4df53f4e156f3e35af3e55df2e661f2e865f2ea69f1ec6df1ed71f1ef75f1f179f2f27df2f482f3f586f3f68af4f88ef5f992f6fa96f8fb9af9fc9dfafda1fcffa4", "magma": "00000401000501010601010802010902020b02020d03030f03031204041405041606051806051a07061c08071e0907200a08220b09240c09260d0a290e0b2b100b2d110c2f120d31130d34140e36150e38160f3b180f3d19103f1a10421c10441d11471e114920114b21114e22115024125325125527125829115a2a115c2c115f2d11612f116331116533106734106936106b38106c390f6e3b0f703d0f713f0f72400f74420f75440f764510774710784910784a10794c117a4e117b4f127b51127c52137c54137d56147d57157e59157e5a167e5c167f5d177f5f187f601880621980641a80651a80671b80681c816a1c816b1d816d1d816e1e81701f81721f817320817521817621817822817922827b23827c23827e24828025828125818326818426818627818827818928818b29818c29818e2a81902a81912b81932b80942c80962c80982d80992d809b2e7f9c2e7f9e2f7fa02f7fa1307ea3307ea5317ea6317da8327daa337dab337cad347cae347bb0357bb2357bb3367ab5367ab73779b83779ba3878bc3978bd3977bf3a77c03a76c23b75c43c75c53c74c73d73c83e73ca3e72cc3f71cd4071cf4070d0416fd2426fd3436ed5446dd6456cd8456cd9466bdb476adc4869de4968df4a68e04c67e24d66e34e65e44f64e55064e75263e85362e95462ea5661eb5760ec5860ed5a5fee5b5eef5d5ef05f5ef1605df2625df2645cf3655cf4675cf4695cf56b5cf66c5cf66e5cf7705cf7725cf8745cf8765cf9785df9795df97b5dfa7d5efa7f5efa815ffb835ffb8560fb8761fc8961fc8a62fc8c63fc8e64fc9065fd9266fd9467fd9668fd9869fd9a6afd9b6bfe9d6cfe9f6dfea16efea36ffea571fea772fea973feaa74feac76feae77feb078feb27afeb47bfeb67cfeb77efeb97ffebb81febd82febf84fec185fec287fec488fec68afec88cfeca8dfecc8ffecd90fecf92fed194fed395fed597fed799fed89afdda9cfddc9efddea0fde0a1fde2a3fde3a5fde5a7fde7a9fde9aafdebacfcecaefceeb0fcf0b2fcf2b4fcf4b6fcf6b8fcf7b9fcf9bbfcfbbdfcfdbf", "plasma": "0d088710078813078916078a19068c1b068d1d068e20068f2206902406912605912805922a05932c05942e05952f059631059733059735049837049938049a3a049a3c049b3e049c3f049c41049d43039e44039e46039f48039f4903a04b03a14c02a14e02a25002a25102a35302a35502a45601a45801a45901a55b01a55c01a65e01a66001a66100a76300a76400a76600a76700a86900a86a00a86c00a86e00a86f00a87100a87201a87401a87501a87701a87801a87a02a87b02a87d03a87e03a88004a88104a78305a78405a78606a68707a68808a68a09a58b0aa58d0ba58e0ca48f0da4910ea3920fa39410a29511a19613a19814a099159f9a169f9c179e9d189d9e199da01a9ca11b9ba21d9aa31e9aa51f99a62098a72197a82296aa2395ab2494ac2694ad2793ae2892b02991b12a90b22b8fb32c8eb42e8db52f8cb6308bb7318ab83289ba3388bb3488bc3587bd3786be3885bf3984c03a83c13b82c23c81c33d80c43e7fc5407ec6417dc7427cc8437bc9447aca457acb4679cc4778cc4977cd4a76ce4b75cf4c74d04d73d14e72d24f71d35171d45270d5536fd5546ed6556dd7566cd8576bd9586ada5a6ada5b69db5c68dc5d67dd5e66de5f65de6164df6263e06363e16462e26561e26660e3685fe4695ee56a5de56b5de66c5ce76e5be76f5ae87059e97158e97257ea7457eb7556eb7655ec7754ed7953ed7a52ee7b51ef7c51ef7e50f07f4ff0804ef1814df1834cf2844bf3854bf3874af48849f48948f58b47f58c46f68d45f68f44f79044f79143f79342f89441f89540f9973ff9983ef99a3efa9b3dfa9c3cfa9e3bfb9f3afba139fba238fca338fca537fca636fca835fca934fdab33fdac33fdae32fdaf31fdb130fdb22ffdb42ffdb52efeb72dfeb82cfeba2cfebb2bfebd2afebe2afec029fdc229fdc328fdc527fdc627fdc827fdca26fdcb26fccd25fcce25fcd025fcd225fbd324fbd524fbd724fad824fada24f9dc24f9dd25f8df25f8e125f7e225f7e425f6e626f6e826f5e926f5eb27f4ed27f3ee27f3f027f2f227f1f426f1f525f0f724f0f921", "viridis": "44015444025645045745055946075a46085c460a5d460b5e470d60470e6147106347116447136548146748166848176948186a481a6c481b6d481c6e481d6f481f70482071482173482374482475482576482677482878482979472a7a472c7a472d7b472e7c472f7d46307e46327e46337f463480453581453781453882443983443a83443b84433d84433e85423f854240864241864142874144874045884046883f47883f48893e49893e4a893e4c8a3d4d8a3d4e8a3c4f8a3c508b3b518b3b528b3a538b3a548c39558c39568c38588c38598c375a8c375b8d365c8d365d8d355e8d355f8d34608d34618d33628d33638d32648e32658e31668e31678e31688e30698e306a8e2f6b8e2f6c8e2e6d8e2e6e8e2e6f8e2d708e2d718e2c718e2c728e2c738e2b748e2b758e2a768e2a778e2a788e29798e297a8e297b8e287c8e287d8e277e8e277f8e27808e26818e26828e26828e25838e25848e25858e24868e24878e23888e23898e238a8d228b8d228c8d228d8d218e8d218f8d21908d21918c20928c20928c20938c1f948c1f958b1f968b1f978b1f988b1f998a1f9a8a1e9b8a1e9c891e9d891f9e891f9f881fa0881fa1881fa1871fa28720a38620a48621a58521a68522a78522a88423a98324aa8325ab8225ac8226ad8127ad8128ae8029af7f2ab07f2cb17e2db27d2eb37c2fb47c31b57b32b67a34b67935b77937b87838b9773aba763bbb753dbc743fbc7340bd7242be7144bf7046c06f48c16e4ac16d4cc26c4ec36b50c46a52c56954c56856c66758c7655ac8645cc8635ec96260ca6063cb5f65cb5e67cc5c69cd5b6ccd5a6ece5870cf5773d05675d05477d1537ad1517cd2507fd34e81d34d84d44b86d54989d5488bd6468ed64590d74393d74195d84098d83e9bd93c9dd93ba0da39a2da37a5db36a8db34aadc32addc30b0dd2fb2dd2db5de2bb8de29bade28bddf26c0df25c2df23c5e021c8e020cae11fcde11dd0e11cd2e21bd5e21ad8e219dae319dde318dfe318e2e418e5e419e7e419eae51aece51befe51cf1e51df4e61ef6e620f8e621fbe723fde725", "turbo": "30123b32154333184a341b51351e5836215f37246638276d392a733a2d793b2f803c32863d358b3e38913f3b973f3e9c4040a24143a74146ac4249b1424bb5434eba4451bf4454c34456c74559cb455ccf455ed34661d64664da4666dd4669e0466be3476ee64771e94773eb4776ee4778f0477bf2467df44680f64682f84685fa4687fb458afc458cfd448ffe4391fe4294ff4196ff4099ff3e9bfe3d9efe3ba0fd3aa3fc38a5fb37a8fa35abf833adf731aff52fb2f42eb4f22cb7f02ab9ee28bceb27bee925c0e723c3e422c5e220c7df1fc9dd1ecbda1ccdd81bd0d51ad2d21ad4d019d5cd18d7ca18d9c818dbc518ddc218dec018e0bd19e2bb19e3b91ae4b61ce6b41de7b21fe9af20eaac22ebaa25eca727eea42aefa12cf09e2ff19b32f29835f39438f4913cf58e3ff68a43f78746f8844af8804ef97d52fa7a55fa7659fb735dfc6f61fc6c65fd6969fd666dfe6271fe5f75fe5c79fe597dff5680ff5384ff5188ff4e8bff4b8fff4992ff4796fe4499fe429cfe409ffd3fa1fd3da4fc3ca7fc3aa9fb39acfb38affa37b1f936b4f836b7f735b9f635bcf534bef434c1f334c3f134c6f034c8ef34cbed34cdec34d0ea34d2e935d4e735d7e535d9e436dbe236dde037dfdf37e1dd37e3db38e5d938e7d739e9d539ebd339ecd13aeecf3aefcd3af1cb3af2c93af4c73af5c53af6c33af7c13af8be39f9bc39faba39fbb838fbb637fcb336fcb136fdae35fdac34fea933fea732fea431fea130fe9e2ffe9b2dfe992cfe962bfe932afe9029fd8d27fd8a26fc8725fc8423fb8122fb7e21fa7b1ff9781ef9751df8721cf76f1af66c19f56918f46617f36315f26014f15d13f05b12ef5811ed5510ec530feb500eea4e0de84b0ce7490ce5470be4450ae2430ae14109df3f08dd3d08dc3b07da3907d83706d63506d43305d23105d02f05ce2d04cc2b04ca2a04c82803c52603c32503c12302be2102bc2002b91e02b71d02b41b01b21a01af1801ac1701a91601a71401a41301a112019e10019b0f01980e01950d01920b018e0a018b09028808028507028106027e05027a0403", "spectral": "5e4fa25c51a35b53a45956a55758a6555aa7545ca8525fa95061aa4e63ac4d65ad4b68ae496aaf486cb0466eb14471b24273b34175b43f77b53d79b63b7cb73a7eb83880b93682ba3585bb3387bc3389bd358bbc378ebb3990ba3b92b93d95b83f97b74199b6439bb5459eb447a0b349a2b24ba4b14ea7b050a9af52abae54aead56b0ad58b2ac5ab4ab5cb7aa5eb9a960bba862bda764c0a666c2a569c3a56bc4a56ec5a571c6a574c7a576c8a579c9a57ccaa57ecca581cda584cea586cfa589d0a48cd1a48fd2a491d3a494d4a497d5a499d6a49cd7a49fd8a4a2d9a4a4daa4a7dba4aadca4acdda4aedea3b1dfa3b3e0a2b5e1a2b8e2a1bae3a1bce4a0bfe5a0c1e6a0c3e79fc6e89fc8e99ecaea9ecdeb9dcfec9dd1ed9cd3ed9cd6ee9bd8ef9bdaf09addf19adff299e1f399e4f498e6f598e7f59ae8f69be9f69deaf79eebf7a0ecf7a1edf8a3eef8a4eff9a6f0f9a7f1f9a9f2faaaf3faacf4faadf5fbaff6fbb0f7fcb2f8fcb4f9fcb5fafdb7fbfdb8fcfebafdfebbfefebdffffbefffebefffdbcfffcbafffbb8fffab6fff8b4fff7b2fff6b0fff5aefff3acfff2aafff1a8fff0a6feefa3feeda1feec9ffeeb9dfeea9bfee999fee797fee695fee593fee491fee28ffee18dfee08bfede89fedc88feda86fed884fed683fed481fed27ffed07efece7cfecc7bfeca79fec877fdc776fdc574fdc372fdc171fdbf6ffdbd6dfdbb6cfdb96afdb768fdb567fdb365fdb163fdaf62fdad60fcaa5ffca85efca55dfba35cfba05bfb9d59fa9b58fa9857fa9656f99355f99153f98e52f88c51f88950f8864ff7844ef7814cf67f4bf67c4af67a49f57748f57547f57245f47044f46d43f36b43f26944f06744ef6645ee6445ed6246eb6046ea5e47e95c47e85b48e75948e55749e45549e3534ae2514ae1504bdf4e4bde4c4bdd4a4cdc484cda464dd9444dd8434ed7414ed63f4fd43d4fd23a4ed0384ecd364dcb334dc9314cc72e4cc52c4bc32a4bc1274abe254abc2249ba2049b81e48b61b48b41947b11747af1446ad1246ab0f45a90d45a70b44a40844a20643a003439e0142", "cividis": "00224e00234f00245100255300255400265600275800285900285b00295d002a5f002a61002b62002c64002c66002d68002e6a002e6c002f6d00306f0030700031700031710132710533710833700c34700f357012357014367016377018376f1a386f1c396f1e3a6f203a6f213b6e233c6e243c6e263d6e273e6e293f6e2a3f6d2b406d2d416d2e416d2f426d31436d32436d33446d34456c35456c36466c38476c39486c3a486c3b496c3c4a6c3d4a6c3e4b6c3f4c6c404c6c414d6c424e6c434e6c444f6c45506c46516c47516c48526c49536c4a536c4b546c4c556c4d556c4e566c4f576c50576c51586d52596d535a6d545a6d555b6d555c6d565c6d575d6d585e6d595e6e5a5f6e5b606e5c616e5d616e5e626e5e636f5f636f60646f61656f62656f636670646770656870656870666970676a71686a71696b716a6c716b6d726c6d726c6e726d6f726e6f736f70737071737172747272747273747374757474757575757676767777767777777878777979777a7a787b7a787c7b787d7c787e7c787e7d787f7e78807f78817f788280798381798482798582798683798784788885788985788a86788b87788c88788d88788e89788f8a78908b78918b78928c78928d78938e78948e77958f779690779791779892779992779a93769b94769c95769d95769e96769f9775a09875a19975a29975a39a74a49b74a59c74a69c74a79d73a89e73a99f73aaa073aba072aca172ada272aea371afa471b0a571b1a570b3a670b4a76fb5a86fb6a96fb7a96eb8aa6eb9ab6dbaac6dbbad6dbcae6cbdae6cbeaf6bbfb06bc0b16ac1b26ac2b369c3b369c4b468c5b568c6b667c7b767c8b866c9b965cbb965ccba64cdbb63cebc63cfbd62d0be62d1bf61d2c060d3c05fd4c15fd5c25ed6c35dd7c45cd9c55cdac65bdbc75adcc859ddc858dec958dfca57e0cb56e1cc55e2cd54e4ce53e5cf52e6d051e7d150e8d24fe9d34eead34cebd44bedd54aeed649efd748f0d846f1d945f2da44f3db42f5dc41f6dd3ff7de3ef8df3cf9e03afbe138fce236fde334fee434fee535fee636fee838"};
+const LUTS = {};
+for (const k in LUT_HEX) {
+  const h = LUT_HEX[k], a = new Uint8Array(768);
+  for (let i = 0; i < 768; i++) a[i] = parseInt(h.substr(i * 2, 2), 16);
+  LUTS[k] = a;
+}
+LUTS.gray = (() => { const a = new Uint8Array(768); for (let i = 0; i < 256; i++) a[i*3] = a[i*3+1] = a[i*3+2] = i; return a; })();
+const CMAPS = [["inferno","Inferno"],["magma","Magma"],["turbo","Turbo"],["plasma","Plasma"],["viridis","Viridis"],["spectral","Spectral"],["cividis","Cividis"],["gray","Cinza"]];
+const cssGrad = (k, dir = "90deg") => {
+  const a = LUTS[k], stops = [];
+  for (let s = 0; s <= 8; s++) { const i = Math.round(s / 8 * 255); stops.push(`rgb(${a[i*3]},${a[i*3+1]},${a[i*3+2]}) ${s/8*100}%`); }
+  return `linear-gradient(${dir}, ${stops.join(",")})`;
+};
+
+/* ================= state ================= */
+const DEFAULTS = { cmap:"inferno", intensity:100, contrast:100, near:100, far:0, temporal:2, blur:0, norm:"frame", invert:false };
+const S = Object.assign({ view:"compare", wipe:0.5 }, DEFAULTS);
+let SRC = null;          // current source
+let cur = 0;             // current frame index
+let busy = false;        // generating or exporting
+let cancelGen = false;
+let playing = false, rafId = 0;
+
+const video = $("#video");
+const cvO = $("#cvOrig"), cxO = cvO.getContext("2d");
+const cvD = $("#cvDepth"), cxD = cvD.getContext("2d");
+const frameEl = $("#frame");
+
+/* ================= transfer function ================= */
+const TF = new Uint8Array(4096);
+function buildTF() {
+  const nr = S.near / 100, fr = Math.min(S.far / 100, nr - 0.02);
+  const c = S.contrast / 100, g = Math.pow(2, (100 - S.intensity) / 55);
+  for (let i = 0; i < 4096; i++) {
+    let d = i / 4095;
+    if (S.invert) d = 1 - d;
+    d = (d - fr) / (nr - fr);
+    d = d < 0 ? 0 : d > 1 ? 1 : d;
+    d = (d - 0.5) * c + 0.5;
+    d = d < 0 ? 0 : d > 1 ? 1 : d;
+    d = Math.pow(d, g);
+    TF[i] = Math.round(d * 255);
+  }
+  drawScale();
+}
+function drawScale() {
+  const cv = $("#cvScale"), cx = cv.getContext("2d"), im = cx.createImageData(1, 256), L = LUTS[S.cmap];
+  for (let y = 0; y < 256; y++) {
+    const idx = TF[Math.round((1 - y / 255) * 4095)] * 3;
+    im.data[y*4] = L[idx]; im.data[y*4+1] = L[idx+1]; im.data[y*4+2] = L[idx+2]; im.data[y*4+3] = 255;
+  }
+  cx.putImageData(im, 0, 0);
+  const r = $("#ramp"), rc = r.getContext("2d"), ri = rc.createImageData(18, 18);
+  for (let y = 0; y < 18; y++) for (let x = 0; x < 18; x++) {
+    const d = Math.min(1, Math.max(0, 1 - Math.hypot(x - 5, y - 5) / 16));
+    const i = TF[Math.round(d * 4095)] * 3, o = (y*18+x)*4;
+    ri.data[o]=L[i]; ri.data[o+1]=L[i+1]; ri.data[o+2]=L[i+2]; ri.data[o+3]=255;
+  }
+  rc.putImageData(ri, 0, 0);
+}
+
+/* ================= frame storage ================= */
+function packFrame(raw) {
+  const N = raw.length;
+  let mn = Infinity, mx = -Infinity;
+  for (let k = 0; k < N; k++) { const v = raw[k]; if (v < mn) mn = v; if (v > mx) mx = v; }
+  const span = (mx - mn) || 1e-6, q = new Uint16Array(N), hist = new Uint32Array(1024), f = 65535 / span;
+  for (let k = 0; k < N; k++) { const v = ((raw[k] - mn) * f + 0.5) | 0; q[k] = v; hist[v >> 6]++; }
+  let c = 0, lo = 0, hi = 1023;
+  for (let t = 0; t < 1024; t++) { c += hist[t]; if (c >= N * 0.01) { lo = t; break; } }
+  c = 0;
+  for (let t = 0; t < 1024; t++) { c += hist[t]; if (c >= N * 0.99) { hi = t; break; } }
+  return { q, min: mn, max: mx, lo: mn + lo / 1024 * span, hi: mn + (hi + 1) / 1024 * span };
+}
+function addFrame(src, raw) {
+  const fr = packFrame(raw);
+  src.frames.push(fr);
+  src.G.lo = Math.min(src.G.lo, fr.lo);
+  src.G.hi = Math.max(src.G.hi, fr.hi);
+  normCache.clear();
+}
+const normCache = new Map();
+function getNorm(i) {
+  const key = i + "|" + S.norm;
+  let a = normCache.get(key);
+  if (a) { normCache.delete(key); normCache.set(key, a); return a; }
+  const f = SRC.frames[i], N = f.q.length;
+  const lo = S.norm === "global" ? SRC.G.lo : f.lo, hi = S.norm === "global" ? SRC.G.hi : f.hi;
+  const sc = (f.max - f.min) / 65535, inv = 1 / Math.max(1e-6, hi - lo), off = f.min - lo;
+  a = new Float32Array(N);
+  const q = f.q;
+  for (let k = 0; k < N; k++) { let v = (q[k] * sc + off) * inv; a[k] = v < 0 ? 0 : v > 1 ? 1 : v; }
+  normCache.set(key, a);
+  if (normCache.size > 24) normCache.delete(normCache.keys().next().value);
+  return a;
+}
+
+let work = null, tmp = null, img = null;
+function boxBlur(a, t, w, h, r) {
+  const d = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w; let s = 0;
+    for (let x = -r; x <= r; x++) s += a[row + Math.min(w - 1, Math.max(0, x))];
+    for (let x = 0; x < w; x++) {
+      t[row + x] = s / d;
+      s += a[row + Math.min(w - 1, x + r + 1)] - a[row + Math.max(0, x - r)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = -r; y <= r; y++) s += t[Math.min(h - 1, Math.max(0, y)) * w + x];
+    for (let y = 0; y < h; y++) {
+      a[y * w + x] = s / d;
+      s += t[Math.min(h - 1, y + r + 1) * w + x] - t[Math.max(0, y - r) * w + x];
+    }
+  }
+}
+function computeDepth(i) {
+  const { w, h } = SRC, N = w * h, n = SRC.frames.length;
+  if (!work || work.length !== N) { work = new Float32Array(N); tmp = new Float32Array(N); img = new ImageData(w, h); }
+  const r = S.temporal;
+  if (r > 0 && n > 1) {
+    work.fill(0);
+    let ws = 0; const sig = Math.max(0.6, r / 2);
+    for (let k = -r; k <= r; k++) {
+      const j = i + k; if (j < 0 || j >= n) continue;
+      const wt = Math.exp(-(k * k) / (2 * sig * sig)); ws += wt;
+      const a = getNorm(j);
+      for (let p = 0; p < N; p++) work[p] += wt * a[p];
+    }
+    const inv = 1 / ws; for (let p = 0; p < N; p++) work[p] *= inv;
+  } else work.set(getNorm(i));
+  if (S.blur > 0) { boxBlur(work, tmp, w, h, S.blur); boxBlur(work, tmp, w, h, S.blur); }
+  return work;
+}
+function paintDepth(i) {
+  if (!SRC || !SRC.frames.length) return;
+  i = Math.max(0, Math.min(SRC.frames.length - 1, i));
+  const d = computeDepth(i), L = LUTS[S.cmap], px = img.data;
+  for (let p = 0, o = 0; p < d.length; p++, o += 4) {
+    const c = TF[(d[p] * 4095) | 0] * 3;
+    px[o] = L[c]; px[o+1] = L[c+1]; px[o+2] = L[c+2]; px[o+3] = 255;
+  }
+  if (cvD.width !== SRC.w || cvD.height !== SRC.h) { cvD.width = SRC.w; cvD.height = SRC.h; }
+  cxD.putImageData(img, 0, 0);
+}
+
+/* ================= demo scene (procedural) ================= */
+function makeDemo() {
+  const w = 448, h = 252, n = 48, fps = 24;
+  const src = { kind:"demo", name:"Cena de exemplo", w, h, n, fps, frames:[], G:{lo:Infinity, hi:-Infinity}, orig:[], vw:w*2, vh:h*2, start:0 };
+  const spheres = [
+    { c:[-1.15, 0.55, 4.2], r:0.55, col:[0.95,0.62,0.30] },
+    { c:[ 0.55, 0.85, 6.4], r:0.85, col:[0.30,0.62,0.66] },
+    { c:[ 2.30, 0.40, 3.4], r:0.40, col:[0.85,0.80,0.74] },
+    { c:[-2.60, 1.30, 9.5], r:1.30, col:[0.55,0.45,0.40] },
+    { c:[ 3.60, 1.60, 12.5], r:1.60, col:[0.40,0.50,0.58] }
+  ];
+  const Lk = norm3([-0.55, 0.75, -0.35]);
+  for (let f = 0; f < n; f++) {
+    const t = f / n * Math.PI * 2;
+    const cam = [Math.sin(t) * 0.9, 1.05 + Math.sin(t * 2) * 0.08, -0.6 + Math.cos(t) * 0.5];
+    const yaw = Math.sin(t) * -0.12;
+    const raw = new Float32Array(w * h), im = new ImageData(w, h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const u = (x + 0.5) / w * 2 - 1, v = ((y + 0.5) / h * 2 - 1) * (h / w);
+      let dx = u * 0.9, dy = -v * 0.9 - 0.08, dz = 1;
+      const cy = Math.cos(yaw), sy = Math.sin(yaw);
+      [dx, dz] = [dx * cy + dz * sy, -dx * sy + dz * cy];
+      const il = 1 / Math.hypot(dx, dy, dz); dx *= il; dy *= il; dz *= il;
+      let tBest = 1e9, hit = -1;
+      for (let s = 0; s < spheres.length; s++) {
+        const sp = spheres[s], ox = cam[0]-sp.c[0], oy = cam[1]-sp.c[1], oz = cam[2]-sp.c[2];
+        const b = ox*dx + oy*dy + oz*dz, cc = ox*ox + oy*oy + oz*oz - sp.r*sp.r, disc = b*b - cc;
+        if (disc > 0) { const tt = -b - Math.sqrt(disc); if (tt > 0.01 && tt < tBest) { tBest = tt; hit = s; } }
+      }
+      if (dy < 0) { const tg = -cam[1] / dy; if (tg < tBest) { tBest = tg; hit = 99; } }
+      const o = (y * w + x) * 4; let r, g, bl;
+      if (hit < 0) {
+        const k = Math.max(0, dy + 0.1);
+        r = 0.05 + 0.10 * (1-k); g = 0.13 + 0.12 * (1-k); bl = 0.17 + 0.10 * (1-k);
+        raw[y*w+x] = 0.02;
+      } else {
+        const px = cam[0] + dx*tBest, py = cam[1] + dy*tBest, pz = cam[2] + dz*tBest;
+        let nx, ny, nz, base;
+        if (hit === 99) {
+          nx = 0; ny = 1; nz = 0;
+          const chk = ((Math.floor(px * 1.2) + Math.floor(pz * 1.2)) & 1) ? 0.20 : 0.15;
+          base = [chk * 0.9, chk, chk * 1.05];
+        } else {
+          const sp = spheres[hit]; nx = (px-sp.c[0])/sp.r; ny = (py-sp.c[1])/sp.r; nz = (pz-sp.c[2])/sp.r; base = sp.col;
+        }
+        const lam = Math.max(0, nx*Lk[0] + ny*Lk[1] + nz*Lk[2]);
+        const rim = Math.pow(Math.max(0, 1 + (nx*dx + ny*dy + nz*dz)), 3) * 0.35;
+        const fog = Math.exp(-tBest * 0.07);
+        r = (base[0] * (0.15 + lam * 1.05 * 1.0) + rim * 0.15) * fog + 0.06 * (1-fog);
+        g = (base[1] * (0.15 + lam * 0.95 * 0.82) + rim * 0.6) * fog + 0.12 * (1-fog);
+        bl = (base[2] * (0.15 + lam * 0.85 * 0.62) + rim * 0.62) * fog + 0.16 * (1-fog);
+        raw[y*w+x] = 1 / tBest;
+      }
+      im.data[o] = Math.min(255, Math.pow(r * 1.7, 0.8) * 255);
+      im.data[o+1] = Math.min(255, Math.pow(g * 1.7, 0.8) * 255);
+      im.data[o+2] = Math.min(255, Math.pow(bl * 1.7, 0.8) * 255);
+      im.data[o+3] = 255;
+    }
+    addFrame(src, raw);
+    src.orig.push(im);
+  }
+  return src;
+}
+function norm3(v) { const l = Math.hypot(v[0], v[1], v[2]); return [v[0]/l, v[1]/l, v[2]/l]; }
+
+/* ================= original frame drawing ================= */
+function sizeOrigCanvas() {
+  if (!SRC) return;
+  let ow, oh;
+  if (SRC.kind === "demo") { ow = SRC.orig[0].width; oh = SRC.orig[0].height; }
+  else { const k = Math.min(1, 1280 / Math.max(SRC.vw, SRC.vh)); ow = Math.round(SRC.vw * k); oh = Math.round(SRC.vh * k); }
+  if (cvO.width !== ow || cvO.height !== oh) { cvO.width = ow; cvO.height = oh; }
+}
+function drawOrigNow() {
+  if (!SRC) return;
+  if (SRC.kind === "demo") cxO.putImageData(SRC.orig[cur], 0, 0);
+  else if (SRC.kind === "image") cxO.drawImage(SRC.bitmap, 0, 0, cvO.width, cvO.height);
+  else if (video.readyState >= 2) cxO.drawImage(video, 0, 0, cvO.width, cvO.height);
+}
+function seekTo(t) {
+  return new Promise(res => {
+    if (Math.abs(video.currentTime - t) < 1e-4 && video.readyState >= 2) { res(); return; }
+    let to;
+    const done = () => { video.removeEventListener("seeked", done); clearTimeout(to); res(); };
+    to = setTimeout(done, 4000);
+    video.addEventListener("seeked", done);
+    video.currentTime = t;
+  });
+}
+let seekBusy = false, seekWant = -1;
+async function seekOrig(i) {
+  seekWant = i;
+  if (seekBusy) return;
+  seekBusy = true;
+  while (seekWant >= 0) {
+    const j = seekWant; seekWant = -1;
+    await seekTo(frameTime(j));
+    if (!playing) drawOrigNow();
+  }
+  seekBusy = false;
+}
+function frameTime(i) { return Math.min(SRC.start + i / SRC.fps, Math.max(0, (SRC.duration || 0) - 0.001)); }
+
+/* ================= view / layout ================= */
+function layoutFrame() {
+  if (!SRC) return;
+  const ar = SRC.vw / SRC.vh;
+  frameEl.style.aspectRatio = `${SRC.vw} / ${SRC.vh}`;
+  frameEl.style.width = `min(100%, calc(66vh * ${ar.toFixed(4)}))`;
+}
+function applyView() {
+  const hasDepth = SRC && SRC.frames.length > 0;
+  let v = S.view;
+  if (!hasDepth) v = "orig";
+  cvD.hidden = v === "orig";
+  cvO.hidden = v === "depth";
+  $("#wipe").hidden = v !== "compare";
+  $("#tagL").hidden = v !== "compare" && v !== "orig";
+  $("#tagR").hidden = v !== "compare" && v !== "depth";
+  $("#tagL").textContent = "Original";
+  if (v === "compare") {
+    cvD.style.clipPath = `inset(0 0 0 ${S.wipe * 100}%)`;
+    $("#wipe").style.left = `${S.wipe * 100}%`;
+  } else cvD.style.clipPath = "none";
+  $$(".views button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === S.view)));
+}
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60), s = sec - m * 60;
+  return `${String(m).padStart(2,"0")}:${s.toFixed(2).padStart(5,"0")}`;
+}
+function updateTransport() {
+  const n = SRC ? SRC.frames.length : 0;
+  const tl = $("#timeline");
+  tl.max = Math.max(0, n - 1); tl.value = cur; tl.disabled = n < 2 || busy; fillRange(tl);
+  const fps = SRC ? SRC.fps : 24;
+  $("#tc").innerHTML = `<strong>${String(n ? cur + 1 : 0).padStart(3,"0")}</strong> / ${String(n).padStart(3,"0")} · ${fmtTime(n ? cur / fps : 0)}`;
+  $("#btnPlay").disabled = n < 2 || busy;
+}
+function showFrame(i, fromPlayback) {
+  if (!SRC) return;
+  const n = SRC.frames.length;
+  cur = n ? Math.max(0, Math.min(n - 1, i)) : 0;
+  if (n) paintDepth(cur);
+  if (SRC.kind === "video") { if (fromPlayback) drawOrigNow(); else seekOrig(cur); }
+  else drawOrigNow();
+  updateTransport();
+}
+function refresh() { buildTF(); if (SRC && SRC.frames.length) paintDepth(cur); }
+
+/* ================= playback ================= */
+function setPlayIcon() {
+  $("#icoPlay").innerHTML = playing ? '<path d="M3 1.5h3v11H3zM8 1.5h3v11H8z"/>' : '<path d="M3 1.5v11l9-5.5z"/>';
+  $("#btnPlay").setAttribute("aria-label", playing ? "Pausar" : "Reproduzir");
+}
+function play() {
+  if (!SRC || SRC.frames.length < 2 || busy) return;
+  playing = true; setPlayIcon();
+  const n = SRC.frames.length;
+  if (SRC.kind === "video") {
+    video.currentTime = frameTime(cur);
+    video.play().catch(() => {});
+    const onFrame = (now, meta) => {
+      if (!playing) return;
+      const t = meta ? meta.mediaTime : video.currentTime;
+      let i = Math.round((t - SRC.start) * SRC.fps);
+      if (i >= n || video.ended) { video.currentTime = SRC.start; i = 0; video.play().catch(() => {}); }
+      showFrame(Math.max(0, i), true);
+      schedule();
+    };
+    const schedule = () => {
+      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onFrame);
+      else rafId = requestAnimationFrame(() => onFrame(0, null));
+    };
+    schedule();
+  } else {
+    const t0 = performance.now(), i0 = cur;
+    const step = () => {
+      if (!playing) return;
+      const i = (i0 + Math.floor((performance.now() - t0) / 1000 * SRC.fps)) % n;
+      if (i !== cur) showFrame(i, true);
+      rafId = requestAnimationFrame(step);
+    };
+    rafId = requestAnimationFrame(step);
+  }
+}
+function pause() {
+  if (!playing) return;
+  playing = false; setPlayIcon();
+  cancelAnimationFrame(rafId);
+  if (SRC && SRC.kind === "video") { video.pause(); seekOrig(cur); }
+}
+$("#btnPlay").addEventListener("click", () => playing ? pause() : play());
+$("#timeline").addEventListener("input", e => { if (playing) pause(); showFrame(+e.target.value); });
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input, select, textarea")) return;
+  if (e.code === "Space") { e.preventDefault(); playing ? pause() : play(); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); pause(); showFrame(cur + 1); }
+  else if (e.key === "ArrowLeft") { e.preventDefault(); pause(); showFrame(cur - 1); }
+});
+$$(".views button").forEach(b => b.addEventListener("click", () => { S.view = b.dataset.view; applyView(); }));
+
+/* wipe drag */
+(() => {
+  let drag = false;
+  const setFromEvent = e => {
+    const r = frameEl.getBoundingClientRect();
+    S.wipe = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    applyView();
+  };
+  frameEl.addEventListener("pointerdown", e => { if (S.view !== "compare") return; drag = true; frameEl.setPointerCapture(e.pointerId); setFromEvent(e); });
+  frameEl.addEventListener("pointermove", e => { if (drag) setFromEvent(e); });
+  frameEl.addEventListener("pointerup", () => { drag = false; });
+  frameEl.addEventListener("pointercancel", () => { drag = false; });
+})();
+
+/* ================= controls ================= */
+function buildMaps() {
+  const box = $("#maps"); box.innerHTML = "";
+  for (const [k, label] of CMAPS) {
+    const b = document.createElement("button");
+    b.className = "map"; b.type = "button"; b.dataset.cmap = k;
+    b.setAttribute("aria-pressed", String(S.cmap === k));
+    b.innerHTML = `<i style="background:${cssGrad(k)}"></i><span>${label}</span>`;
+    b.addEventListener("click", () => { S.cmap = k; syncControls(); refresh(); });
+    box.appendChild(b);
+  }
+}
+const sliders = [["rIntensity","intensity","oIntensity"],["rContrast","contrast","oContrast"],["rNear","near","oNear"],["rFar","far","oFar"],["rTemporal","temporal","oTemporal"],["rBlur","blur","oBlur"]];
+let rafRefresh = 0;
+for (const [id, key, out] of sliders) {
+  $("#" + id).addEventListener("input", e => {
+    S[key] = +e.target.value;
+    if (key === "near" && S.near - S.far < 5) { S.far = S.near - 5; }
+    if (key === "far" && S.near - S.far < 5) { S.near = S.far + 5; }
+    syncControls();
+    cancelAnimationFrame(rafRefresh);
+    rafRefresh = requestAnimationFrame(refresh);
+  });
+}
+$$(".norm button").forEach(b => b.addEventListener("click", () => { S.norm = b.dataset.norm; syncControls(); refresh(); }));
+$("#chkInvert").addEventListener("change", e => { S.invert = e.target.checked; updateSummaries(); refresh(); });
+["#selRes","#selFps","#selOut"].forEach(sel => $(sel).addEventListener("change", updateSummaries));
+$("#btnReset").addEventListener("click", () => { Object.assign(S, DEFAULTS); syncControls(); refresh(); });
+function fillRange(el) {
+  const mn = +el.min || 0, mx = +el.max || 0, p = mx > mn ? (+el.value - mn) / (mx - mn) * 100 : 0;
+  el.style.setProperty("--p", p + "%");
+}
+function updateSummaries() {
+  $("#sumVideo").textContent = !SRC || SRC.kind === "demo" ? "Exemplo" : SRC.name;
+  $("#sumGen").textContent = `${$("#selRes").value} px · ${$("#selFps").value} fps`;
+  const cm = CMAPS.find(c => c[0] === S.cmap);
+  $("#sumAdj").textContent = (cm ? cm[1] : "") + (S.invert ? " · invertido" : "");
+  const o = $("#selOut").selectedOptions[0];
+  $("#sumOut").textContent = o ? o.textContent.split(" · ").pop() : "";
+}
+function syncControls() {
+  for (const [id, key, out] of sliders) { $("#" + id).value = S[key]; $("#" + out).textContent = S[key]; fillRange($("#" + id)); }
+  updateSummaries();
+  $("#chkInvert").checked = S.invert;
+  $$(".norm button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.norm === S.norm)));
+  $$(".map").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.cmap === S.cmap)));
+}
+
+/* ================= engine / model ================= */
+const ORT_MJS = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort-wasm-simd-threaded.jsep.mjs";
+const PARTS = { ort:2, fp16:4, int8:2 };
+const SIZES = { ort:21872216, fp16:49642442, int8:27258801 };
+let session = null, sessionKind = null, wasmReady = false;
+function setEngineChip(text, cls) {
+  const c = $("#chipEngine"); c.className = "status " + (cls || ""); c.querySelector("span").textContent = text;
+}
+const MODEL_BASE = "https://huggingface.co/onnx-community/depth-anything-v2-small/resolve/4472b7362082ad9968fee890ca0f1e5aca36b93d/onnx/";
+const MODEL_URLS = { fp16: MODEL_BASE + "model_fp16.onnx", int8: MODEL_BASE + "model_quantized.onnx" };
+async function fetchParts(name, onProgress) {
+  const url = MODEL_URLS[name], total = SIZES[name];
+  let cache = null;
+  try { cache = await caches.open("chama-deepmap-v1"); const hit = await cache.match(url); if (hit) { const b = new Uint8Array(await hit.arrayBuffer()); if (b.length === total) { onProgress && onProgress(1); return b; } } } catch { cache = null; }
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Falha ao baixar o modelo (${res.status}). Verifique sua internet.`);
+  const buf = new Uint8Array(total); let off = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (off + value.length > total) throw new Error("Download do modelo corrompido. Tente de novo.");
+    buf.set(value, off); off += value.length;
+    onProgress && onProgress(off / total);
+  }
+  if (off !== total) throw new Error("Download do modelo incompleto. Tente de novo.");
+  if (cache) { try { await cache.put(url, new Response(buf.slice())); } catch {} }
+  return buf;
+}
+async function hasWebGPU() {
+  try { if (!navigator.gpu) return false; const a = await navigator.gpu.requestAdapter(); return !!a; } catch { return false; }
+}
+async function ensureSession(pref, report) {
+  if (typeof ort === "undefined") throw new Error("Não consegui carregar o motor de IA. Recarregue a página.");
+  const wantGPU = pref !== "cpu" && await hasWebGPU();
+  if (pref === "gpu" && !wantGPU) report("WebGPU não está disponível neste navegador. Usando o processador.");
+  const kind = wantGPU ? "gpu" : "cpu";
+  if (session && sessionKind === kind) return session;
+  if (!wasmReady) {
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
+    wasmReady = true;
+  }
+  if (kind === "gpu") {
+    try {
+      const model = await fetchParts("fp16", p => report("Baixando modelo (50 MB, só na primeira vez)…", p));
+      report("Preparando a placa de vídeo…", 1);
+      try {
+        session = await ort.InferenceSession.create(model, { executionProviders:["webgpu"] });
+      } catch (e1) {
+        session = await ort.InferenceSession.create(model, { executionProviders:["webgpu"], graphOptimizationLevel:"basic" });
+      }
+      sessionKind = "gpu"; setEngineChip("Processando na GPU", "ok");
+      return session;
+    } catch (e) {
+      console.warn("WebGPU falhou, usando CPU", e);
+      report("A placa de vídeo não aceitou o modelo. Usando o processador.");
+    }
+  }
+  const model = await fetchParts("int8", p => report("Baixando modelo (27 MB, só na primeira vez)…", p));
+  report("Preparando o processador…", 1);
+  session = await ort.InferenceSession.create(model, { executionProviders:["wasm"] });
+  sessionKind = "cpu"; setEngineChip("Processando no processador", "warn");
+  return session;
+}
+
+/* ================= loading user media ================= */
+let pending = null; // {kind, file, url, duration, vw, vh, bitmap}
+$("#btnFile").addEventListener("click", () => $("#file").click());
+$("#file").addEventListener("change", e => { const f = e.target.files[0]; if (f) loadFile(f); e.target.value = ""; });
+(() => {
+  const viewer = $("#viewer"); let depth = 0;
+  viewer.addEventListener("dragenter", e => { e.preventDefault(); depth++; $("#dropHint").hidden = false; });
+  viewer.addEventListener("dragover", e => e.preventDefault());
+  viewer.addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) $("#dropHint").hidden = true; });
+  viewer.addEventListener("drop", e => {
+    e.preventDefault(); depth = 0; $("#dropHint").hidden = true;
+    const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadFile(f);
+  });
+})();
+
+async function loadFile(file) {
+  if (busy) return;
+  pause();
+  const isImg = file.type.startsWith("image/");
+  const isVid = file.type.startsWith("video/") || /\.(mp4|mov|m4v|webm|mkv)$/i.test(file.name);
+  if (!isImg && !isVid) { showGenMsg("Esse arquivo não é vídeo nem imagem.", true); return; }
+  showGenMsg("");
+  if (SRC && SRC.url) URL.revokeObjectURL(SRC.url);
+  if (isImg) {
+    let bitmap;
+    try { bitmap = await createImageBitmap(file); } catch { showGenMsg("Não consegui abrir essa imagem.", true); return; }
+    SRC = { kind:"image", name:file.name, vw:bitmap.width, vh:bitmap.height, bitmap, frames:[], G:{lo:Infinity,hi:-Infinity}, fps:24, start:0, duration:0, w:0, h:0 };
+  } else {
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    try {
+      await new Promise((res, rej) => {
+        const ok = () => { cleanup(); res(); }, bad = () => { cleanup(); rej(); };
+        const cleanup = () => { video.removeEventListener("loadeddata", ok); video.removeEventListener("error", bad); };
+        video.addEventListener("loadeddata", ok); video.addEventListener("error", bad);
+        video.load();
+      });
+    } catch {
+      showGenMsg("Seu navegador não conseguiu ler esse vídeo. Tente exportar em MP4 (H.264).", true);
+      return;
+    }
+    SRC = { kind:"video", name:file.name, url, vw:video.videoWidth, vh:video.videoHeight, duration:video.duration, frames:[], G:{lo:Infinity,hi:-Infinity}, fps:24, start:0, w:0, h:0 };
+    $("#inStart").value = 0;
+    $("#inEnd").value = (Math.floor(video.duration * 10) / 10).toFixed(1);
+    $("#inStart").max = $("#inEnd").max = video.duration.toFixed(2);
+  }
+  cur = 0; normCache.clear(); work = null;
+  $("#demoBadge").hidden = true;
+  $("#rowTrim").hidden = SRC.kind !== "video";
+  $("#fileMeta").hidden = false;
+  $("#fileMeta").innerHTML = `<canvas width="104" height="64"></canvas><div><strong>${escapeHtml(SRC.name)}</strong><span>${SRC.vw}×${SRC.vh}` + (SRC.kind === "video" ? ` · ${SRC.duration.toFixed(1)} s` : " · imagem") + `</span></div>`;
+  sizeOrigCanvas(); layoutFrame();
+  cxD.clearRect(0, 0, cvD.width, cvD.height);
+  if (SRC.kind === "video") await seekTo(0);
+  drawOrigNow(); applyView(); updateTransport(); updateEstimate(); buildOutOptions(); updateSummaries();
+  { const th = $("#fileMeta canvas"); if (th) { const tc = th.getContext("2d"), k = Math.max(104 / cvO.width, 64 / cvO.height); tc.drawImage(cvO, (104 - cvO.width * k) / 2, (64 - cvO.height * k) / 2, cvO.width * k, cvO.height * k); } }
+  $("#btnGen").disabled = false;
+}
+function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+function mapDims(L) {
+  const vw = SRC.vw, vh = SRC.vh;
+  let W, H;
+  if (vw >= vh) { W = L; H = Math.max(14, Math.round(L * vh / vw / 14) * 14); }
+  else { H = L; W = Math.max(14, Math.round(L * vw / vh / 14) * 14); }
+  return { W, H };
+}
+function plan() {
+  const L = +$("#selRes").value, fps = +$("#selFps").value;
+  const { W, H } = mapDims(L);
+  if (SRC.kind === "image") return { W, H, fps, start:0, n:1, capped:false };
+  if (SRC.kind === "demo") return { W, H, fps:SRC.fps, start:0, n:SRC.orig.length, capped:false };
+  let start = Math.max(0, +$("#inStart").value || 0), end = +$("#inEnd").value || SRC.duration;
+  end = Math.min(SRC.duration, Math.max(start + 1 / fps, end));
+  let n = Math.max(1, Math.floor((end - start) * fps + 1e-6));
+  const maxN = Math.floor(6e8 / (W * H * 2));
+  const capped = n > maxN; if (capped) n = maxN;
+  return { W, H, fps, start, end, n, capped, maxN };
+}
+function updateEstimate() {
+  if (!SRC) return;
+  const p = plan();
+  if (SRC.kind === "demo") { $("#estimate").textContent = `Teste com a cena de exemplo: ${p.n} frames em ${p.W}×${p.H}.`; return; }
+  let txt = `${p.n} ${p.n === 1 ? "frame" : "frames"} em ${p.W}×${p.H}.`;
+  if (p.capped) txt += ` Limite de memória: ${(p.maxN / p.fps).toFixed(1)} s nessa resolução. Diminua a resolução ou processe em trechos.`;
+  $("#estimate").textContent = txt;
+}
+["#selRes","#selFps","#inStart","#inEnd"].forEach(s => $(s).addEventListener("input", updateEstimate));
+
+function showGenMsg(t, err) { const m = $("#genMsg"); m.hidden = !t; m.textContent = t || ""; m.classList.toggle("err", !!err); }
+function setProgress(el, fill, left, right, frac, l, r) {
+  $(el).hidden = false; $(fill).style.width = `${Math.round(Math.max(0, Math.min(1, frac)) * 100)}%`;
+  $(left).textContent = l; $(right).textContent = r;
+}
+function lockUI(on) {
+  busy = on;
+  ["#btnGen","#btnFile","#selRes","#selFps","#inStart","#inEnd","#selEngine","#btnMp4","#btnPng","#btnZip","#selOut"].forEach(s => $(s).disabled = on);
+  updateTransport();
+}
+
+/* ================= generation ================= */
+$("#btnCancel").addEventListener("click", () => { cancelGen = true; });
+$("#btnGen").addEventListener("click", generate);
+async function generate() {
+  if (!SRC || busy) return;
+  pause();
+  const p = plan();
+  lockUI(true); cancelGen = false;
+  $("#btnCancel").hidden = false; showGenMsg("");
+  const report = (msg, frac) => setProgress("#progress", "#barFill", "#pLeft", "#pRight", frac ?? 0, msg, frac != null ? `${Math.round(frac * 100)}%` : "");
+  let sess;
+  try { sess = await ensureSession($("#selEngine").value, report); }
+  catch (e) {
+    console.error(e);
+    showGenMsg(e && e.message ? e.message : "Não consegui carregar o modelo.", true);
+    $("#progress").hidden = true; $("#btnCancel").hidden = true; lockUI(false); return;
+  }
+  SRC.frames = []; SRC.G = { lo:Infinity, hi:-Infinity }; SRC.fps = p.fps; SRC.start = p.start; SRC.w = p.W; SRC.h = p.H;
+  normCache.clear(); work = null; cur = 0;
+  const inName = sess.inputNames[0], outName = sess.outputNames[0];
+  const inCv = document.createElement("canvas"); inCv.width = p.W; inCv.height = p.H;
+  const inCx = inCv.getContext("2d", { willReadFrequently:true }); inCx.imageSmoothingQuality = "high";
+  const N = p.W * p.H, input = new Float32Array(3 * N);
+  const demoCv = document.createElement("canvas"), demoCx = demoCv.getContext("2d");
+  if (SRC.kind === "demo") { demoCv.width = SRC.orig[0].width; demoCv.height = SRC.orig[0].height; }
+  const t0 = performance.now();
+  if (S.view === "orig") S.view = "compare";
+  try {
+    for (let i = 0; i < p.n; i++) {
+      if (cancelGen) break;
+      if (SRC.kind === "video") { await seekTo(frameTime(i)); drawOrigNow(); inCx.drawImage(video, 0, 0, p.W, p.H); }
+      else if (SRC.kind === "demo") { demoCx.putImageData(SRC.orig[i], 0, 0); inCx.drawImage(demoCv, 0, 0, p.W, p.H); }
+      else inCx.drawImage(SRC.bitmap, 0, 0, p.W, p.H);
+      const px = inCx.getImageData(0, 0, p.W, p.H).data;
+      for (let k = 0, o = 0; k < N; k++, o += 4) {
+        input[k]       = (px[o]   / 255 - 0.485) / 0.229;
+        input[N + k]   = (px[o+1] / 255 - 0.456) / 0.224;
+        input[2*N + k] = (px[o+2] / 255 - 0.406) / 0.225;
+      }
+      const res = await sess.run({ [inName]: new ort.Tensor("float32", input, [1, 3, p.H, p.W]) });
+      const out = res[outName];
+      let data = out.data;
+      if (out.location && out.location !== "cpu") data = await out.getData();
+      const [, oh, ow] = out.dims;
+      if (oh !== p.H || ow !== p.W) { SRC.h = oh; SRC.w = ow; }
+      addFrame(SRC, data);
+      cur = i; paintDepth(i); if (SRC.kind !== "video") drawOrigNow(); applyView(); updateTransport();
+      const el = (performance.now() - t0) / 1000, rate = (i + 1) / el, left = (p.n - i - 1) / rate;
+      report(`Frame ${i + 1} de ${p.n} · ${rate.toFixed(1)} fps`, (i + 1) / p.n);
+      $("#pRight").textContent = i + 1 < p.n ? `falta ~${fmtDur(left)}` : "pronto";
+    }
+  } catch (e) {
+    console.error(e);
+    showGenMsg("O processamento parou com um erro. Tente uma resolução menor ou o modo Processador.", true);
+  }
+  $("#btnCancel").hidden = true;
+  lockUI(false);
+  const n = SRC.frames.length;
+  if (n) {
+    if (cancelGen) showGenMsg(`Parado. ${n} frames prontos para ajustar e exportar.`);
+    else showGenMsg(`Pronto. ${n} ${n === 1 ? "frame" : "frames"} em ${fmtDur((performance.now() - t0) / 1000)}.`);
+    buildOutOptions(); showFrame(0); applyView();
+  } else if (!$("#genMsg").textContent) showGenMsg("Nenhum frame foi gerado.", true);
+}
+function fmtDur(s) { if (!isFinite(s)) return "—"; if (s < 60) return `${Math.ceil(s)} s`; const m = Math.floor(s / 60); return `${m} min ${Math.round(s - m * 60)} s`; }
+
+/* ================= export ================= */
+function evenDims(w, h) { return { w: Math.max(2, Math.round(w / 2) * 2), h: Math.max(2, Math.round(h / 2) * 2) }; }
+function buildOutOptions() {
+  const sel = $("#selOut"), prev = sel.value; sel.innerHTML = "";
+  if (!SRC) return;
+  const opts = [];
+  const mw = SRC.w || mapDims(+$("#selRes").value).W, mh = SRC.h || mapDims(+$("#selRes").value).H;
+  opts.push(["map", `Tamanho do mapa · ${mw}×${mh}`]);
+  const ar = SRC.vw / SRC.vh;
+  for (const s of [720, 1080]) {
+    const d = ar >= 1 ? evenDims(s * ar, s) : evenDims(s, s / ar);
+    opts.push([String(s), `${s}p · ${d.w}×${d.h}`]);
+  }
+  if (SRC.kind !== "demo") {
+    const k = Math.min(1, 3840 / Math.max(SRC.vw, SRC.vh)), d = evenDims(SRC.vw * k, SRC.vh * k);
+    opts.push(["src", `Igual ao original · ${d.w}×${d.h}`]);
+  }
+  for (const [v, t] of opts) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); }
+  sel.value = opts.some(o => o[0] === prev) ? prev : (SRC.kind === "demo" ? "map" : "1080");
+  if (typeof updateSummaries === "function") updateSummaries();
+}
+function outDims() {
+  const v = $("#selOut").value, ar = SRC.vw / SRC.vh;
+  if (v === "map") return evenDims(SRC.w, SRC.h);
+  if (v === "src") { const k = Math.min(1, 3840 / Math.max(SRC.vw, SRC.vh)); return evenDims(SRC.vw * k, SRC.vh * k); }
+  const s = +v; return ar >= 1 ? evenDims(s * ar, s) : evenDims(s, s / ar);
+}
+function renderOut(i, cv, cx) {
+  paintDepth(i);
+  cx.imageSmoothingEnabled = true; cx.imageSmoothingQuality = "high";
+  cx.drawImage(cvD, 0, 0, cv.width, cv.height);
+}
+function exMsg(t, err) { const m = $("#exMsg"); m.hidden = !t; m.textContent = t || ""; m.classList.toggle("err", !!err); }
+function baseName() { return (SRC && SRC.name ? SRC.name.replace(/\.[^.]+$/, "") : "exemplo").replace(/[^\w\-]+/g, "_").slice(0, 60) + "_depth"; }
+async function offer(filename, data) {
+  try {
+    const blob = data instanceof Blob ? data : new Blob([data]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.rel = "noopener";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    exMsg(`${filename} baixado.`);
+    return true;
+  } catch (e) {
+    console.error(e);
+    exMsg("Não consegui baixar o arquivo. Tente de novo.", true);
+    return false;
+  }
+}
+function needFrames() {
+  if (!SRC || !SRC.frames.length) { exMsg("Gere o deep map primeiro.", true); return false; }
+  return true;
+}
+$("#btnPng").addEventListener("click", async () => {
+  if (!needFrames() || busy) return;
+  pause();
+  const d = outDims(), cv = document.createElement("canvas"); cv.width = d.w; cv.height = d.h;
+  renderOut(cur, cv, cv.getContext("2d"));
+  const blob = await new Promise(r => cv.toBlob(r, "image/png"));
+  await offer(`${baseName()}_${String(cur + 1).padStart(4, "0")}.png`, blob);
+});
+$("#btnZip").addEventListener("click", async () => {
+  if (!needFrames() || busy) return;
+  if (typeof JSZip === "undefined") { exMsg("Não consegui carregar o compactador. Recarregue a página.", true); return; }
+  pause(); lockUI(true); exMsg("");
+  const d = outDims(), cv = document.createElement("canvas"); cv.width = d.w; cv.height = d.h; const cx = cv.getContext("2d");
+  const zip = new JSZip(), n = SRC.frames.length, keep = cur;
+  try {
+    for (let i = 0; i < n; i++) {
+      renderOut(i, cv, cx);
+      const blob = await new Promise(r => cv.toBlob(r, "image/png"));
+      zip.file(`depth_${String(i + 1).padStart(4, "0")}.png`, blob);
+      setProgress("#exProgress", "#exFill", "#exLeft", "#exRight", (i + 1) / n * 0.9, `PNG ${i + 1} de ${n}`, "");
+    }
+    setProgress("#exProgress", "#exFill", "#exLeft", "#exRight", 0.95, "Compactando…", "");
+    const out = await zip.generateAsync({ type:"blob", compression:"STORE" });
+    setProgress("#exProgress", "#exFill", "#exLeft", "#exRight", 1, "Pronto", `${(out.size / 1e6).toFixed(1)} MB`);
+    lockUI(false); showFrame(keep);
+    await offer(`${baseName()}_png.zip`, out);
+  } catch (e) { console.error(e); exMsg("A exportação falhou. Tente um tamanho menor.", true); lockUI(false); showFrame(keep); }
+});
+$("#btnMp4").addEventListener("click", async () => {
+  if (!needFrames() || busy) return;
+  if (typeof VideoEncoder === "undefined" || typeof Mp4Muxer === "undefined") { exMsg("Este navegador não exporta MP4. Use o Chrome ou o Edge, ou exporte a sequência PNG.", true); return; }
+  pause(); exMsg("");
+  const d = outDims(), fps = SRC.fps, n = SRC.frames.length, keep = cur;
+  const bitrate = Math.round(Math.min(40e6, Math.max(6e6, d.w * d.h * fps * 0.25)));
+  let codec = null;
+  for (const c of ["avc1.640034","avc1.640033","avc1.640028","avc1.4d0034","avc1.4d0028","avc1.42003e"]) {
+    try { const s = await VideoEncoder.isConfigSupported({ codec:c, width:d.w, height:d.h, bitrate, framerate:fps }); if (s.supported) { codec = c; break; } } catch {}
+  }
+  if (!codec) { exMsg(`Este navegador não codifica H.264 em ${d.w}×${d.h}. Escolha um tamanho menor.`, true); return; }
+  lockUI(true);
+  const cv = document.createElement("canvas"); cv.width = d.w; cv.height = d.h; const cx = cv.getContext("2d");
+  try {
+    const muxer = new Mp4Muxer.Muxer({ target:new Mp4Muxer.ArrayBufferTarget(), video:{ codec:"avc", width:d.w, height:d.h, frameRate:fps }, fastStart:"in-memory" });
+    let encErr = null;
+    const enc = new VideoEncoder({ output:(chunk, meta) => muxer.addVideoChunk(chunk, meta), error:e => { encErr = e; } });
+    enc.configure({ codec, width:d.w, height:d.h, bitrate, framerate:fps, bitrateMode:"variable" });
+    const dur = Math.round(1e6 / fps), gop = Math.max(1, Math.round(fps * 2));
+    for (let i = 0; i < n; i++) {
+      if (encErr) throw encErr;
+      renderOut(i, cv, cx);
+      const vf = new VideoFrame(cv, { timestamp: Math.round(i * 1e6 / fps), duration: dur });
+      enc.encode(vf, { keyFrame: i % gop === 0 }); vf.close();
+      while (enc.encodeQueueSize > 6) await new Promise(r => setTimeout(r, 4));
+      setProgress("#exProgress", "#exFill", "#exLeft", "#exRight", (i + 1) / n, `Codificando ${i + 1} de ${n}`, `${d.w}×${d.h}`);
+    }
+    await enc.flush(); enc.close();
+    if (encErr) throw encErr;
+    muxer.finalize();
+    const blob = new Blob([muxer.target.buffer], { type:"video/mp4" });
+    setProgress("#exProgress", "#exFill", "#exLeft", "#exRight", 1, "Pronto", `${(blob.size / 1e6).toFixed(1)} MB`);
+    lockUI(false); showFrame(keep);
+    await offer(`${baseName()}.mp4`, blob);
+  } catch (e) { console.error(e); exMsg("A codificação do MP4 falhou. Tente um tamanho menor ou a sequência PNG.", true); lockUI(false); showFrame(keep); }
+});
+
+/* ================= boot ================= */
+buildMaps(); syncControls(); buildTF();
+SRC = makeDemo();
+sizeOrigCanvas(); layoutFrame(); buildOutOptions();
+cur = 20; showFrame(cur); applyView();
+$("#rowTrim").hidden = true;
+updateEstimate();
+$("#btnGen").disabled = false;
+hasWebGPU().then(g => setEngineChip(g ? "GPU disponível" : "Sem GPU · usa o processador", g ? "ok" : "warn"));
+})();
+</script>
+
+</body>
+</html>
